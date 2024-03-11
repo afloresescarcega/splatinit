@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <math.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -65,8 +64,8 @@ int encode_splats_play_canvas_format(Vertex* vertices, int num_vertices, int coa
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        printf("Usage: %s <image_path>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        printf("Usage: %s <image_path> [depth_map_path]\n", argv[0]);
         return 1;
     }
 
@@ -79,6 +78,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    int depth_width = 0, depth_height = 0, depth_channels = 0;
+    unsigned char* depth_data = NULL;
+    if (argc == 3) {
+        depth_data = stbi_load(argv[2], &depth_width, &depth_height, &depth_channels, 1);
+        if (!depth_data || depth_width != width || depth_height != height) {
+            printf("Failed to load depth map or dimensions mismatch.\n");
+            stbi_image_free(image_data);
+            return 1;
+        }
+        printf("Using depth information.\n");
+    }
+
     int num_vertices = width * height;
     Vertex* vertices = (Vertex*)malloc(num_vertices * sizeof(Vertex));
 
@@ -87,7 +98,13 @@ int main(int argc, char* argv[]) {
             int index = y * width + x;
             vertices[index].packed_position[0] = (float)x;
             vertices[index].packed_position[1] = (float)y;
-            vertices[index].packed_position[2] = FLAT ? 0.0f : 0.0f; // TODO: Generate depth map
+
+            if (depth_data) {
+                float depth = depth_data[index];
+                vertices[index].packed_position[2] = depth;
+            } else {
+                vertices[index].packed_position[2] = FLAT ? 0.0f : 0.0f;
+            }
 
             float rgb[3];
             for (int c = 0; c < 3; c++) {
@@ -106,45 +123,49 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Coalesce adjacent vertices of the same color
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int index = y * width + x;
-            Vertex* current = &vertices[index];
+    int coalesced_num_vertices = num_vertices;
 
-            if (current->opacity == 0.0f) {
-                continue; // Skip already coalesced vertices
-            }
+    if (!depth_data) {
+        // Coalesce adjacent vertices of the same color only if there's no depth map
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                Vertex* current = &vertices[index];
 
-            // Check the right neighbor
-            if (x < width - 1) {
-                Vertex* right = &vertices[index + 1];
-                if (memcmp(current->packed_color, right->packed_color, sizeof(float) * 3) == 0) {
-                    // Colors match, coalesce the vertices
-                    current->packed_position[0] = (current->packed_position[0] + right->packed_position[0]) / 2.0f;
-                    current->packed_scale[0] *= 2.0f;
-                    right->opacity = 0.0f; // Mark the right vertex as coalesced
+                if (current->opacity == 0.0f) {
+                    continue; // Skip already coalesced vertices
                 }
-            }
 
-            // Check the bottom neighbor
-            if (y < height - 1) {
-                Vertex* bottom = &vertices[index + width];
-                if (memcmp(current->packed_color, bottom->packed_color, sizeof(float) * 3) == 0) {
-                    // Colors match, coalesce the vertices
-                    current->packed_position[1] = (current->packed_position[1] + bottom->packed_position[1]) / 2.0f;
-                    current->packed_scale[1] *= 2.0f;
-                    bottom->opacity = 0.0f; // Mark the bottom vertex as coalesced
+                // Check the right neighbor
+                if (x < width - 1) {
+                    Vertex* right = &vertices[index + 1];
+                    if (memcmp(current->packed_color, right->packed_color, sizeof(float) * 3) == 0) {
+                        // Colors match, coalesce the vertices
+                        current->packed_position[0] = (current->packed_position[0] + right->packed_position[0]) / 2.0f;
+                        current->packed_scale[0] *= 2.0f;
+                        right->opacity = 0.0f; // Mark the right vertex as coalesced
+                    }
+                }
+
+                // Check the bottom neighbor
+                if (y < height - 1) {
+                    Vertex* bottom = &vertices[index + width];
+                    if (memcmp(current->packed_color, bottom->packed_color, sizeof(float) * 3) == 0) {
+                        // Colors match, coalesce the vertices
+                        current->packed_position[1] = (current->packed_position[1] + bottom->packed_position[1]) / 2.0f;
+                        current->packed_scale[1] *= 2.0f;
+                        bottom->opacity = 0.0f; // Mark the bottom vertex as coalesced
+                    }
                 }
             }
         }
-    }
 
-    // Count the number of remaining vertices after coalescing
-    int coalesced_num_vertices = 0;
-    for (int i = 0; i < num_vertices; i++) {
-        if (vertices[i].opacity != 0.0f) {
-            coalesced_num_vertices++;
+        // Count the number of remaining vertices after coalescing
+        coalesced_num_vertices = 0;
+        for (int i = 0; i < num_vertices; i++) {
+            if (vertices[i].opacity != 0.0f) {
+                coalesced_num_vertices++;
+            }
         }
     }
 
@@ -155,6 +176,9 @@ int main(int argc, char* argv[]) {
         printf("Failed to open output file.\n");
         free(vertices);
         stbi_image_free(image_data);
+        if (depth_data) {
+            stbi_image_free(depth_data);
+        }
         return 1;
     }
 
@@ -173,6 +197,9 @@ int main(int argc, char* argv[]) {
 
     free(vertices);
     stbi_image_free(image_data);
+    if (depth_data) {
+        stbi_image_free(depth_data);
+    }
 
     return 0;
 }
