@@ -50,13 +50,15 @@ void rgb2_sh(float rgb[3], float sh[3]) {
     }
 }
 
-int encode_splats_play_canvas_format(Vertex* vertices, int num_vertices, FILE* file) {
+int encode_splats_play_canvas_format(Vertex* vertices, int num_vertices, int coalesced_num_vertices, FILE* file) {
     char header[1024];
-    sprintf(header, PLAY_CANVAS_PLY_HEADER, num_vertices);
+    sprintf(header, PLAY_CANVAS_PLY_HEADER, coalesced_num_vertices);
     fwrite(header, 1, strlen(header), file);
 
     for (int i = 0; i < num_vertices; i++) {
-        fwrite(&vertices[i], sizeof(Vertex), 1, file);
+        if (vertices[i].opacity != 0.0f) {
+            fwrite(&vertices[i], sizeof(Vertex), 1, file);
+        }
     }
 
     return ftell(file);
@@ -104,6 +106,48 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Coalesce adjacent vertices of the same color
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int index = y * width + x;
+            Vertex* current = &vertices[index];
+
+            if (current->opacity == 0.0f) {
+                continue; // Skip already coalesced vertices
+            }
+
+            // Check the right neighbor
+            if (x < width - 1) {
+                Vertex* right = &vertices[index + 1];
+                if (memcmp(current->packed_color, right->packed_color, sizeof(float) * 3) == 0) {
+                    // Colors match, coalesce the vertices
+                    current->packed_position[0] = (current->packed_position[0] + right->packed_position[0]) / 2.0f;
+                    current->packed_scale[0] *= 2.0f;
+                    right->opacity = 0.0f; // Mark the right vertex as coalesced
+                }
+            }
+
+            // Check the bottom neighbor
+            if (y < height - 1) {
+                Vertex* bottom = &vertices[index + width];
+                if (memcmp(current->packed_color, bottom->packed_color, sizeof(float) * 3) == 0) {
+                    // Colors match, coalesce the vertices
+                    current->packed_position[1] = (current->packed_position[1] + bottom->packed_position[1]) / 2.0f;
+                    current->packed_scale[1] *= 2.0f;
+                    bottom->opacity = 0.0f; // Mark the bottom vertex as coalesced
+                }
+            }
+        }
+    }
+
+    // Count the number of remaining vertices after coalescing
+    int coalesced_num_vertices = 0;
+    for (int i = 0; i < num_vertices; i++) {
+        if (vertices[i].opacity != 0.0f) {
+            coalesced_num_vertices++;
+        }
+    }
+
     char output_path[256];
     sprintf(output_path, "%s%s", OUTPUT_DIR, OUTPUT_PLY_NAME);
     FILE* file = fopen(output_path, "wb");
@@ -114,7 +158,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int bytes_written = encode_splats_play_canvas_format(vertices, num_vertices, file);
+    int bytes_written = encode_splats_play_canvas_format(vertices, num_vertices, coalesced_num_vertices, file);
     fclose(file);
 
     printf("Output file: %s\n", output_path);
