@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <getopt.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -63,16 +64,50 @@ int encode_splats_play_canvas_format(Vertex* vertices, int num_vertices, int coa
     return ftell(file);
 }
 
+void print_help() {
+    printf("Usage: gaussian_splats [options] <image_path> [depth_map_path]\n");
+    printf("Options:\n");
+    printf("  -h, --help       Show this help message and exit\n");
+    printf("  -o, --output     Specify the output file path\n");
+}
+
 int main(int argc, char* argv[]) {
-    if (argc < 2 || argc > 3) {
-        printf("Usage: %s <image_path> [depth_map_path]\n", argv[0]);
+    char output_path[256];
+    sprintf(output_path, "%s%s", OUTPUT_DIR, OUTPUT_PLY_NAME);
+
+    int opt;
+    static struct option long_options[] = {
+            {"help", no_argument, 0, 'h'},
+            {"output", required_argument, 0, 'o'},
+            {0, 0, 0, 0}
+    };
+
+    while ((opt = getopt_long(argc, argv, "ho:", long_options, NULL)) != -1) {
+        switch (opt) {
+            case 'h':
+                print_help();
+                return 0;
+            case 'o':
+                strcpy(output_path, optarg);
+                break;
+            default:
+                print_help();
+                return 1;
+        }
+    }
+
+    if (optind >= argc || optind + 2 < argc) {
+        print_help();
         return 1;
     }
+
+    const char* image_path = argv[optind];
+    const char* depth_map_path = (optind + 1 < argc) ? argv[optind + 1] : NULL;
 
     clock_t start_time = clock();
 
     int width, height, channels;
-    unsigned char* image_data = stbi_load(argv[1], &width, &height, &channels, 3);
+    unsigned char* image_data = stbi_load(image_path, &width, &height, &channels, 3);
     if (!image_data) {
         printf("Failed to load image.\n");
         return 1;
@@ -80,8 +115,8 @@ int main(int argc, char* argv[]) {
 
     int depth_width = 0, depth_height = 0, depth_channels = 0;
     unsigned char* depth_data = NULL;
-    if (argc == 3) {
-        depth_data = stbi_load(argv[2], &depth_width, &depth_height, &depth_channels, 1);
+    if (depth_map_path != NULL) {
+        depth_data = stbi_load(depth_map_path, &depth_width, &depth_height, &depth_channels, 1);
         if (!depth_data || depth_width != width || depth_height != height) {
             printf("Failed to load depth map or dimensions mismatch.\n");
             stbi_image_free(image_data);
@@ -169,8 +204,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    char output_path[256];
-    sprintf(output_path, "%s%s", OUTPUT_DIR, OUTPUT_PLY_NAME);
     FILE* file = fopen(output_path, "wb");
     if (!file) {
         printf("Failed to open output file.\n");
