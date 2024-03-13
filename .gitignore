@@ -54,3 +54,4 @@ dkms.conf
 # Misc
 cmake-build-debug/
 .idea/
+build/
