@@ -1,7 +1,3 @@
-//
-// Created by Alex Flores Escarcega on 3/10/24.
-//
-
 #ifndef CSPLATTING_STB_IMAGE_H
 #define CSPLATTING_STB_IMAGE_H
 
